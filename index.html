@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Global Chatboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script>
+        const { useState, useEffect, useRef, createElement: e } = React;
+
+        function MessageCircleIcon({ className = "w-6 h-6" }) {
+            return e('svg', {
+                xmlns: "http://www.w3.org/2000/svg",
+                width: "24",
+                height: "24",
+                viewBox: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                strokeWidth: "2",
+                strokeLinecap: "round",
+                strokeLinejoin: "round",
+                className
+            }, 
+                e('path', { d: "M7.9 20A9 9 0 1 0 4 16.1L2 22Z" })
+            );
+        }
+
+        function SendIcon({ className = "w-4 h-4" }) {
+            return e('svg', {
+                xmlns: "http://www.w3.org/2000/svg",
+                width: "24",
+                height: "24",
+                viewBox: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                strokeWidth: "2",
+                strokeLinecap: "round",
+                strokeLinejoin: "round",
+                className
+            },
+                e('path', { d: "m22 2-7 20-4-9-9-4Z" }),
+                e('path', { d: "M22 2 11 13" })
+            );
+        }
+
+        function AlertCircleIcon({ className = "w-4 h-4" }) {
+            return e('svg', {
+                xmlns: "http://www.w3.org/2000/svg",
+                width: "24",
+                height: "24",
+                viewBox: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                strokeWidth: "2",
+                strokeLinecap: "round",
+                strokeLinejoin: "round",
+                className
+            },
+                e('circle', { cx: "12", cy: "12", r: "10" }),
+                e('line', { x1: "12", y1: "8", x2: "12", y2: "12" }),
+                e('line', { x1: "12", y1: "16", x2: "12.01", y2: "16" })
+            );
+        }
+
+        function GlobalChatboard() {
+            const [messages, setMessages] = useState([]);
+            const [username, setUsername] = useState('');
+            const [message, setMessage] = useState('');
+            const [isLoading, setIsLoading] = useState(true);
+            const [error, setError] = useState('');
+            const messagesEndRef = useRef(null);
+
+            const scrollToBottom = () => {
+                messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+            };
+
+            useEffect(() => {
+                loadMessages();
+                const stored = localStorage.getItem('chatboard_username');
+                if (stored) setUsername(stored);
+            }, []);
+
+            useEffect(() => {
+                scrollToBottom();
+            }, [messages]);
+
+            const loadMessages = async () => {
+                try {
+                    setIsLoading(true);
+                    
+                    // Check if storage API is available
+                    if (!window.storage) {
+                        setError('Storage API not available. This chatboard requires Claude artifact storage.');
+                        setIsLoading(false);
+                        return;
+                    }
+
+                    const result = await window.storage.list('msg:', true);
+                    
+                    if (result && result.keys) {
+                        const msgPromises = result.keys.map(async (key) => {
+                            try {
+                                const data = await window.storage.get(key, true);
+                                return data ? JSON.parse(data.value) : null;
+                            } catch {
+                                return null;
+                            }
+                        });
+                        
+                        const loadedMessages = (await Promise.all(msgPromises))
+                            .filter(m => m !== null)
+                            .sort((a, b) => a.timestamp - b.timestamp);
+                        
+                        setMessages(loadedMessages);
+                    }
+                } catch (err) {
+                    setError('Failed to load messages');
+                    console.error(err);
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+
+            const handleUsernameSubmit = () => {
+                if (username.trim()) {
+                    localStorage.setItem('chatboard_username', username.trim());
+                }
+            };
+
+            const handleMessageSubmit = async () => {
+                if (!username.trim()) {
+                    setError('Please set a username first');
+                    return;
+                }
+                
+                if (!message.trim()) return;
+
+                const newMessage = {
+                    id: Date.now().toString(),
+                    username: username.trim(),
+                    text: message.trim(),
+                    timestamp: Date.now()
+                };
+
+                try {
+                    await window.storage.set(`msg:${newMessage.id}`, JSON.stringify(newMessage), true);
+                    setMessages(prev => [...prev, newMessage]);
+                    setMessage('');
+                    setError('');
+                } catch (err) {
+                    setError('Failed to send message');
+                    console.error(err);
+                }
+            };
+
+            const formatTime = (timestamp) => {
+                const date = new Date(timestamp);
+                return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            };
+
+            if (isLoading) {
+                return e('div', { className: 'flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100' },
+                    e('div', { className: 'text-center' },
+                        e(MessageCircleIcon, { className: 'w-12 h-12 text-indigo-600 animate-pulse mx-auto mb-4' }),
+                        e('p', { className: 'text-gray-600' }, 'Loading chatboard...')
+                    )
+                );
+            }
+
+            return e('div', { className: 'flex flex-col h-screen bg-gradient-to-br from-blue-50 to-indigo-100' },
+                // Header
+                e('header', { className: 'bg-white shadow-md p-4' },
+                    e('div', { className: 'max-w-4xl mx-auto flex items-center justify-between' },
+                        e('div', { className: 'flex items-center gap-2' },
+                            e(MessageCircleIcon, { className: 'w-6 h-6 text-indigo-600' }),
+                            e('h1', { className: 'text-2xl font-bold text-gray-800' }, 'Global Chatboard')
+                        ),
+                        e('div', { className: 'flex gap-2' },
+                            e('input', {
+                                type: 'text',
+                                value: username,
+                                onChange: (ev) => setUsername(ev.target.value),
+                                onKeyDown: (ev) => ev.key === 'Enter' && handleUsernameSubmit(),
+                                placeholder: 'Your username',
+                                className: 'px-3 py-1 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500',
+                                maxLength: 20
+                            }),
+                            e('button', {
+                                onClick: handleUsernameSubmit,
+                                className: 'px-4 py-1 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors'
+                            }, 'Set')
+                        )
+                    )
+                ),
+
+                // Main content
+                e('main', { className: 'flex-1 overflow-hidden max-w-4xl w-full mx-auto p-4' },
+                    e('div', { className: 'bg-white rounded-lg shadow-lg h-full flex flex-col' },
+                        // Messages area
+                        e('div', { className: 'flex-1 overflow-y-auto p-4 space-y-3' },
+                            messages.length === 0 
+                                ? e('div', { className: 'text-center text-gray-500 mt-8' },
+                                    e(MessageCircleIcon, { className: 'w-16 h-16 mx-auto mb-4 text-gray-300' }),
+                                    e('p', null, 'No messages yet. Be the first to say hello!')
+                                )
+                                : messages.map((msg) =>
+                                    e('div', {
+                                        key: msg.id,
+                                        className: `flex flex-col ${msg.username === username ? 'items-end' : 'items-start'}`
+                                    },
+                                        e('div', {
+                                            className: `max-w-xs md:max-w-md px-4 py-2 rounded-lg ${
+                                                msg.username === username
+                                                    ? 'bg-indigo-600 text-white'
+                                                    : 'bg-gray-200 text-gray-800'
+                                            }`
+                                        },
+                                            e('p', { className: 'font-semibold text-sm mb-1' }, msg.username),
+                                            e('p', { className: 'break-words' }, msg.text)
+                                        ),
+                                        e('span', { className: 'text-xs text-gray-500 mt-1 px-2' },
+                                            formatTime(msg.timestamp)
+                                        )
+                                    )
+                                ),
+                            e('div', { ref: messagesEndRef })
+                        ),
+
+                        // Error message
+                        error && e('div', { className: 'px-4 py-2 bg-red-50 border-t border-red-200 flex items-center gap-2 text-red-700' },
+                            e(AlertCircleIcon, { className: 'w-4 h-4' }),
+                            e('span', { className: 'text-sm' }, error)
+                        ),
+
+                        // Input area
+                        e('div', { className: 'p-4 border-t border-gray-200' },
+                            e('div', { className: 'flex gap-2' },
+                                e('input', {
+                                    type: 'text',
+                                    value: message,
+                                    onChange: (ev) => setMessage(ev.target.value),
+                                    onKeyDown: (ev) => ev.key === 'Enter' && handleMessageSubmit(),
+                                    placeholder: 'Type your message...',
+                                    className: 'flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500',
+                                    maxLength: 500
+                                }),
+                                e('button', {
+                                    onClick: handleMessageSubmit,
+                                    disabled: !message.trim() || !username.trim(),
+                                    className: 'px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center gap-2'
+                                },
+                                    e(SendIcon, { className: 'w-4 h-4' }),
+                                    'Send'
+                                )
+                            )
+                        )
+                    )
+                ),
+
+                // Footer
+                e('footer', { className: 'bg-white border-t border-gray-200 p-3 text-center text-sm text-gray-600' },
+                    'Messages are shared globally with all users • Please be respectful'
+                )
+            );
+        }
+
+        // Render the app
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(e(GlobalChatboard));
+    </script>
+</body>
+</html>
