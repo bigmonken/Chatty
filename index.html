@@ -7,6 +7,11 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+    
     <style>
         body {
             margin: 0;
@@ -18,6 +23,28 @@
     <div id="root"></div>
 
     <script>
+        // ============================================
+        // FIREBASE CONFIG - REPLACE WITH YOUR OWN
+        // ============================================
+        const firebaseConfig = {
+  apiKey: "AIzaSyC79Q4N4bchGt_kwcu5IKY_4AfvAcDpleI",
+  authDomain: "chatty-a1995.firebaseapp.com",
+  databaseURL: "https://chatty-a1995-default-rtdb.firebaseio.com",
+  projectId: "chatty-a1995",
+  storageBucket: "chatty-a1995.firebasestorage.app",
+  messagingSenderId: "1056089132464",
+  appId: "1:1056089132464:web:34952c387d04932f245a75"
+};
+        
+        // Initialize Firebase
+        let database;
+        try {
+            firebase.initializeApp(firebaseConfig);
+            database = firebase.database();
+        } catch (error) {
+            console.error("Firebase initialization error:", error);
+        }
+
         const { useState, useEffect, useRef, createElement: e } = React;
 
         function MessageCircleIcon({ className = "w-6 h-6" }) {
@@ -87,59 +114,54 @@
             };
 
             useEffect(() => {
-                loadMessages();
+                if (!database) {
+                    setError('Firebase not configured. Please add your Firebase config.');
+                    setIsLoading(false);
+                    return;
+                }
+
+                // Load username from localStorage
                 const stored = localStorage.getItem('chatboard_username');
                 if (stored) setUsername(stored);
+
+                // Listen for messages
+                const messagesRef = database.ref('messages');
+                
+                messagesRef.orderByChild('timestamp').limitToLast(100).on('value', (snapshot) => {
+                    const data = snapshot.val();
+                    if (data) {
+                        const messageList = Object.keys(data).map(key => ({
+                            id: key,
+                            ...data[key]
+                        })).sort((a, b) => a.timestamp - b.timestamp);
+                        setMessages(messageList);
+                    } else {
+                        setMessages([]);
+                    }
+                    setIsLoading(false);
+                });
+
+                // Cleanup listener
+                return () => messagesRef.off();
             }, []);
 
             useEffect(() => {
                 scrollToBottom();
             }, [messages]);
 
-            const loadMessages = async () => {
-                try {
-                    setIsLoading(true);
-                    
-                    // Check if storage API is available
-                    if (!window.storage) {
-                        setError('Storage API not available. This chatboard requires Claude artifact storage.');
-                        setIsLoading(false);
-                        return;
-                    }
-
-                    const result = await window.storage.list('msg:', true);
-                    
-                    if (result && result.keys) {
-                        const msgPromises = result.keys.map(async (key) => {
-                            try {
-                                const data = await window.storage.get(key, true);
-                                return data ? JSON.parse(data.value) : null;
-                            } catch {
-                                return null;
-                            }
-                        });
-                        
-                        const loadedMessages = (await Promise.all(msgPromises))
-                            .filter(m => m !== null)
-                            .sort((a, b) => a.timestamp - b.timestamp);
-                        
-                        setMessages(loadedMessages);
-                    }
-                } catch (err) {
-                    setError('Failed to load messages');
-                    console.error(err);
-                } finally {
-                    setIsLoading(false);
-                }
-            };
-
             const handleUsernameSubmit = () => {
                 if (username.trim()) {
                     localStorage.setItem('chatboard_username', username.trim());
+                    setError('');
                 }
             };
 
             const handleMessageSubmit = async () => {
+                if (!database) {
+                    setError('Firebase not configured');
+                    return;
+                }
+
                 if (!username.trim()) {
                     setError('Please set a username first');
                     return;
@@ -148,19 +170,17 @@
                 if (!message.trim()) return;
 
                 const newMessage = {
-                    id: Date.now().toString(),
                     username: username.trim(),
                     text: message.trim(),
                     timestamp: Date.now()
                 };
 
                 try {
-                    await window.storage.set(`msg:${newMessage.id}`, JSON.stringify(newMessage), true);
-                    setMessages(prev => [...prev, newMessage]);
+                    await database.ref('messages').push(newMessage);
                     setMessage('');
                     setError('');
                 } catch (err) {
-                    setError('Failed to send message');
+                    setError('Failed to send message: ' + err.message);
                     console.error(err);
                 }
             };
@@ -182,7 +202,7 @@
             return e('div', { className: 'flex flex-col h-screen bg-gradient-to-br from-blue-50 to-indigo-100' },
                 // Header
                 e('header', { className: 'bg-white shadow-md p-4' },
-                    e('div', { className: 'max-w-4xl mx-auto flex items-center justify-between' },
+                    e('div', { className: 'max-w-4xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4' },
                         e('div', { className: 'flex items-center gap-2' },
                             e(MessageCircleIcon, { className: 'w-6 h-6 text-indigo-600' }),
                             e('h1', { className: 'text-2xl font-bold text-gray-800' }, 'Global Chatboard')
